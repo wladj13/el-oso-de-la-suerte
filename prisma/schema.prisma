@@ -1,0 +1,206 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ─────────────────────────────────────────────
+// ENUMS
+// ─────────────────────────────────────────────
+
+enum Rol {
+  comprador
+  organizador
+  vendedor
+  admin
+}
+
+enum PlanOrg {
+  bronce
+  plata
+  oro
+}
+
+enum EstadoRifa {
+  borrador
+  activa
+  pausada
+  finalizada
+  cancelada
+}
+
+enum EstadoTicket {
+  disponible
+  reservado
+  pagado
+  ganador
+}
+
+enum EstadoVoucher {
+  pendiente
+  aprobado
+  rechazado
+}
+
+enum EstadoSuscripcion {
+  activa
+  cancelada
+  vencida
+}
+
+// ─────────────────────────────────────────────
+// MODELOS
+// ─────────────────────────────────────────────
+
+model Profile {
+  id        String   @id @db.Uuid
+  nombre    String?
+  email     String   @unique
+  whatsapp  String?
+  rol       Rol      @default(comprador)
+  avatarUrl String?  @map("avatar_url")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  organizador      Organizador?
+  ticketsComprados Ticket[]     @relation("comprador")
+  ticketsVendidos  Ticket[]     @relation("vendedor")
+  vouchers         Voucher[]
+  vendedor         Vendedor?
+
+  @@map("profiles")
+}
+
+model Organizador {
+  id                   String    @id @default(uuid()) @db.Uuid
+  userId               String    @unique @map("user_id") @db.Uuid
+  nombreNegocio        String    @map("nombre_negocio")
+  slug                 String    @unique
+  descripcion          String?
+  logoUrl              String?   @map("logo_url")
+  plan                 PlanOrg   @default(bronce)
+  planVenceEn          DateTime? @map("plan_vence_en")
+  kycVerificado        Boolean   @default(false) @map("kyc_verificado")
+  whatsapp             String?
+  instagram            String?
+  dominioPersonalizado String?   @map("dominio_personalizado")
+  createdAt            DateTime  @default(now()) @map("created_at")
+
+  profile       Profile       @relation(fields: [userId], references: [id])
+  rifas         Rifa[]
+  vendedores    Vendedor[]
+  suscripciones Suscripcion[]
+
+  @@map("organizadores")
+}
+
+model Rifa {
+  id              String     @id @default(uuid()) @db.Uuid
+  organizadorId   String     @map("organizador_id") @db.Uuid
+  titulo          String
+  descripcion     String?
+  imagenUrl       String?    @map("imagen_url")
+  precioTicket    Decimal    @map("precio_ticket") @db.Decimal(10, 2)
+  totalTickets    Int        @map("total_tickets")
+  ticketsVendidos Int        @default(0) @map("tickets_vendidos")
+  fechaSorteo     DateTime?  @map("fecha_sorteo")
+  estado          EstadoRifa @default(borrador)
+  categoria       String?
+  slug            String     @unique
+  metodosPago     String[]   @map("metodos_pago")
+  createdAt       DateTime   @default(now()) @map("created_at")
+
+  organizador Organizador @relation(fields: [organizadorId], references: [id])
+  premios     Premio[]
+  tickets     Ticket[]
+  vouchers    Voucher[]
+
+  @@map("rifas")
+}
+
+model Premio {
+  id          String  @id @default(uuid()) @db.Uuid
+  rifaId      String  @map("rifa_id") @db.Uuid
+  posicion    Int
+  descripcion String
+  imagenUrl   String? @map("imagen_url")
+
+  rifa Rifa @relation(fields: [rifaId], references: [id], onDelete: Cascade)
+
+  @@map("premios")
+}
+
+model Ticket {
+  id          String       @id @default(uuid()) @db.Uuid
+  rifaId      String       @map("rifa_id") @db.Uuid
+  numero      Int
+  compradorId String?      @map("comprador_id") @db.Uuid
+  vendedorId  String?      @map("vendedor_id") @db.Uuid
+  estado      EstadoTicket @default(disponible)
+  montoPagado Decimal?     @map("monto_pagado") @db.Decimal(10, 2)
+  metodoPago  String?      @map("metodo_pago")
+  voucherUrl  String?      @map("voucher_url")
+  compradoEn  DateTime?    @map("comprado_en")
+
+  rifa      Rifa     @relation(fields: [rifaId], references: [id])
+  comprador Profile? @relation("comprador", fields: [compradorId], references: [id])
+  vendedor  Profile? @relation("vendedor", fields: [vendedorId], references: [id])
+  vouchers  Voucher[]
+
+  @@unique([rifaId, numero])
+  @@map("tickets")
+}
+
+model Voucher {
+  id          String        @id @default(uuid()) @db.Uuid
+  ticketId    String        @map("ticket_id") @db.Uuid
+  compradorId String        @map("comprador_id") @db.Uuid
+  rifaId      String        @map("rifa_id") @db.Uuid
+  imagenUrl   String?       @map("imagen_url")
+  monto       Decimal       @db.Decimal(10, 2)
+  metodoPago  String        @map("metodo_pago")
+  referencia  String?
+  estado      EstadoVoucher @default(pendiente)
+  notaRechazo String?       @map("nota_rechazo")
+  createdAt   DateTime      @default(now()) @map("created_at")
+
+  ticket    Ticket  @relation(fields: [ticketId], references: [id])
+  comprador Profile @relation(fields: [compradorId], references: [id])
+  rifa      Rifa    @relation(fields: [rifaId], references: [id])
+
+  @@map("vouchers")
+}
+
+model Vendedor {
+  id                 String   @id @default(uuid()) @db.Uuid
+  organizadorId      String   @map("organizador_id") @db.Uuid
+  userId             String?  @unique @map("user_id") @db.Uuid
+  nombre             String
+  whatsapp           String?
+  comisionPorcentaje Decimal  @default(10) @map("comision_porcentaje") @db.Decimal(5, 2)
+  activo             Boolean  @default(true)
+  createdAt          DateTime @default(now()) @map("created_at")
+
+  organizador Organizador @relation(fields: [organizadorId], references: [id])
+  profile     Profile?    @relation(fields: [userId], references: [id])
+
+  @@map("vendedores")
+}
+
+model Suscripcion {
+  id            String            @id @default(uuid()) @db.Uuid
+  organizadorId String            @map("organizador_id") @db.Uuid
+  plan          PlanOrg
+  precio        Decimal           @db.Decimal(10, 2)
+  estado        EstadoSuscripcion @default(activa)
+  inicio        DateTime
+  fin           DateTime
+  createdAt     DateTime          @default(now()) @map("created_at")
+
+  organizador Organizador @relation(fields: [organizadorId], references: [id])
+
+  @@map("suscripciones")
+}
