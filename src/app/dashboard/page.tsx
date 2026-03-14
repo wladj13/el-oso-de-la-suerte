@@ -1,259 +1,203 @@
-import { Metadata } from 'next';
 import Link from 'next/link';
-import { Plus, ArrowRight, AlertCircle, CheckCircle, Clock, Zap } from 'lucide-react';
-import StatCard from '@/components/dashboard/StatCard';
-import RifaMiniCard from '@/components/dashboard/RifaMiniCard';
-import { rifasEjemplo } from '@/lib/data';
-import { formatearFecha } from '@/lib/utils';
+import { requireOrganizador } from '@/lib/queries/auth';
+import { getDashboardStats, getVentasRecientes } from '@/lib/queries/stats';
+import { getRifasByOrganizador } from '@/lib/queries/rifas';
+import { aprobarVoucher, rechazarVoucher } from '@/lib/actions/vouchers';
+import { TrendingUp, TrendingDown, AlertCircle, Plus, CheckCircle, XCircle, Clock } from 'lucide-react';
 
-export const metadata: Metadata = { title: 'Dashboard | El Oso de la Suerte' };
-
-// Datos simulados de vouchers pendientes
-const vouchersPendientes = [
-  { id: 'v1', nombre: 'Pedro Ramírez', monto: '$15', metodo: '🏦 Zelle', hace: '5 min', ticket: '#047, #048, #049' },
-  { id: 'v2', nombre: 'Ana Martínez', monto: '$5', metodo: '📲 Pago Móvil', hace: '12 min', ticket: '#123' },
-  { id: 'v3', nombre: 'Luis Torres', monto: '$30', metodo: '🟡 Binance', hace: '28 min', ticket: '#089, #090' },
-  { id: 'v4', nombre: 'Carmen Díaz', monto: '$5', metodo: '🏦 Zelle', hace: '45 min', ticket: '#201' },
-];
-
-// Actividad reciente simulada
-const actividadReciente = [
-  { tipo: 'venta', texto: 'Pedro Ramírez compró 3 tickets del iPhone 15', hace: '5 min', color: 'text-[#228B22]', emoji: '🎟️' },
-  { tipo: 'voucher', texto: 'Voucher de Ana Martínez aprobado automáticamente', hace: '12 min', color: 'text-blue-600', emoji: '✅' },
-  { tipo: 'vista', texto: 'Tu rifa Toyota Corolla alcanzó 12,000 vistas', hace: '1h', color: 'text-purple-600', emoji: '👁️' },
-  { tipo: 'venta', texto: 'Carlos González compró 2 tickets del Samsung TV', hace: '2h', color: 'text-[#228B22]', emoji: '🎟️' },
-  { tipo: 'vendedor', texto: 'Luis (vendedor) vendió 5 tickets hoy', hace: '3h', color: 'text-[#8B4513]', emoji: '🏆' },
-  { tipo: 'meta', texto: '¡La rifa iPhone superó el 75% de ventas!', hace: '4h', color: 'text-[#FFD700]', emoji: '🔥' },
-];
-
-// Proximos sorteos
-const rifasActivas = rifasEjemplo.filter((r) => r.estado === 'activa').slice(0, 3);
-
-export default function DashboardPage() {
-  const totalGanancias = rifasEjemplo.reduce(
-    (acc, r) => acc + r.ticketsVendidos * r.precioTicket,
-    0
+function StatCard({
+  label, valor, sub, icono, tendencia, color = 'brown',
+}: {
+  label: string; valor: string; sub?: string; icono: string;
+  tendencia?: { valor: number; positivo: boolean }; color?: string;
+}) {
+  const colores: Record<string, string> = {
+    brown: 'bg-[#FFF8E7] text-[#8B4513]',
+    gold: 'bg-yellow-50 text-yellow-600',
+    green: 'bg-green-50 text-green-600',
+    red: 'bg-red-50 text-red-600',
+  };
+  return (
+    <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
+      <div className="flex items-start justify-between mb-3">
+        <div className={`w-12 h-12 rounded-xl flex items-center justify-center text-2xl ${colores[color]}`}>
+          {icono}
+        </div>
+        {tendencia && (
+          <div className={`flex items-center gap-1 text-xs font-semibold ${tendencia.positivo ? 'text-green-600' : 'text-red-500'}`}>
+            {tendencia.positivo ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
+            {tendencia.valor}%
+          </div>
+        )}
+      </div>
+      <div className="text-2xl font-black text-gray-900">{valor}</div>
+      <div className="text-sm font-semibold text-gray-600 mt-0.5">{label}</div>
+      {sub && <div className="text-xs text-gray-400 mt-1">{sub}</div>}
+    </div>
   );
+}
+
+function formatMonto(monto: number) {
+  return monto >= 1000 ? `$${(monto / 1000).toFixed(1)}K` : `$${monto.toFixed(0)}`;
+}
+
+export default async function DashboardPage() {
+  const organizador = await requireOrganizador();
+  const [stats, ventas, rifas] = await Promise.all([
+    getDashboardStats(organizador.id),
+    getVentasRecientes(organizador.id, 5),
+    getRifasByOrganizador(organizador.id),
+  ]);
+
+  const rifasActivas = rifas.filter((r) => r.estado === 'activa');
 
   return (
     <div className="space-y-8">
-      {/* Alertas importantes */}
-      <div className="bg-[#FFD700]/10 border border-[#FFD700]/30 rounded-2xl p-4 flex items-start gap-3">
-        <AlertCircle size={18} className="text-[#8B4513] mt-0.5 flex-shrink-0" />
-        <div className="flex-1">
-          <p className="text-sm font-bold text-[#8B4513]">
-            Tienes {vouchersPendientes.length} vouchers pendientes de aprobación
-          </p>
-          <p className="text-xs text-[#8B4513]/70 mt-0.5">
-            El más antiguo lleva 45 min esperando. Aprueba o rechaza para liberar los tickets.
-          </p>
+      {/* Alerta vouchers pendientes */}
+      {stats.vouchersPendientes > 0 && (
+        <div className="flex items-center gap-3 bg-amber-50 border border-amber-200 text-amber-800 rounded-2xl px-5 py-4">
+          <AlertCircle size={20} className="shrink-0 text-amber-500" />
+          <div className="flex-1">
+            <span className="font-bold">{stats.vouchersPendientes} comprobante{stats.vouchersPendientes > 1 ? 's' : ''} esperando aprobación.</span>
+            {' '}Revísalos en{' '}
+            <Link href="/dashboard/ventas" className="underline font-semibold">Ventas</Link>.
+          </div>
         </div>
-        <Link
-          href="/dashboard/ventas"
-          className="text-xs font-black text-[#8B4513] whitespace-nowrap hover:underline"
-        >
-          Revisar →
-        </Link>
-      </div>
+      )}
 
-      {/* KPIs principales */}
+      {/* KPIs */}
       <div>
-        <h2 className="text-sm font-bold text-gray-500 uppercase tracking-wider mb-4">
-          Resumen de hoy
-        </h2>
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          <StatCard
-            titulo="Ganancias totales"
-            valor={`$${totalGanancias.toLocaleString()}`}
-            subvalor="Todos los tiempos"
-            cambio={+23}
-            icono="💰"
-            color="green"
-          />
-          <StatCard
-            titulo="Tickets vendidos hoy"
-            valor="47"
-            subvalor="de 89 disponibles"
-            cambio={+15}
-            icono="🎟️"
-            color="brown"
-          />
-          <StatCard
-            titulo="Rifas activas"
-            valor="3"
-            subvalor="de 5 máx en plan Oro"
-            icono="🎪"
-            color="gold"
-          />
-          <StatCard
-            titulo="Vouchers pendientes"
-            valor={String(vouchersPendientes.length)}
-            subvalor="Requieren revisión"
-            cambio={-2}
-            icono="📋"
-            color="red"
-          />
-        </div>
-      </div>
-
-      {/* Stats secundarios */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <StatCard titulo="Vistas hoy" valor="1,247" cambio={+8} icono="👁️" color="blue" />
-        <StatCard titulo="Vendedores activos" valor="5" icono="👥" color="purple" />
-        <StatCard titulo="Tasa de conversión" valor="34%" cambio={+4} icono="📈" color="green" />
-        <StatCard titulo="Promedio ticket" valor="$7.40" cambio={+2} icono="🎯" color="brown" />
-      </div>
-
-      {/* Contenido principal: 2 columnas */}
-      <div className="grid lg:grid-cols-3 gap-8">
-        {/* Rifas activas */}
-        <div className="lg:col-span-2 space-y-5">
-          <div className="flex items-center justify-between">
-            <h2 className="font-black text-gray-900 text-lg">🎪 Mis Rifas Activas</h2>
-            <Link
-              href="/dashboard/rifas"
-              className="text-sm text-[#8B4513] font-bold hover:underline flex items-center gap-1"
-            >
-              Ver todas <ArrowRight size={14} />
-            </Link>
-          </div>
-
-          <div className="space-y-4">
-            {rifasActivas.map((rifa) => (
-              <RifaMiniCard key={rifa.id} rifa={rifa} />
-            ))}
-          </div>
-
-          {/* Botón nueva rifa */}
-          <Link
-            href="/dashboard/rifas/nueva"
-            className="flex items-center justify-center gap-3 w-full border-2 border-dashed border-[#FFD700]/40 rounded-2xl py-5 text-[#8B4513] hover:border-[#FFD700] hover:bg-[#FFF8E7] transition-all font-bold text-sm"
-          >
-            <Plus size={18} />
-            Crear Nueva Rifa
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-black text-gray-900">Resumen General</h2>
+          <Link href="/dashboard/nueva-rifa"
+            className="flex items-center gap-2 bg-[#8B4513] hover:bg-[#5C2D09] text-white text-sm font-bold px-4 py-2 rounded-xl transition-colors">
+            <Plus size={16} /> Nueva Rifa
           </Link>
         </div>
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <StatCard label="Ingresos Totales" valor={formatMonto(stats.ingresosTotales)} sub="Tickets aprobados" icono="💰" color="brown" tendencia={{ valor: 12, positivo: true }} />
+          <StatCard label="Tickets Hoy" valor={String(stats.ventasHoy)} sub="Vendidos hoy" icono="🎟️" color="gold" />
+          <StatCard label="Rifas Activas" valor={String(stats.rifasActivas)} sub={`${stats.totalRifas} en total`} icono="🎪" color="green" />
+          <StatCard label="Comprobantes" valor={String(stats.vouchersPendientes)} sub="Pendientes" icono="📋" color={stats.vouchersPendientes > 0 ? 'red' : 'green'} />
+        </div>
+      </div>
 
-        {/* Panel derecho */}
-        <div className="space-y-5">
-          {/* Vouchers pendientes */}
-          <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
-            <div className="flex items-center justify-between px-5 py-4 border-b border-gray-50">
-              <h2 className="font-black text-gray-900 text-sm">
-                📋 Vouchers Pendientes
-                <span className="ml-2 text-xs bg-red-100 text-red-600 px-2 py-0.5 rounded-full font-bold">
-                  {vouchersPendientes.length}
-                </span>
-              </h2>
-              <Link href="/dashboard/ventas" className="text-xs text-[#8B4513] font-bold hover:underline">
-                Ver todos
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Rifas activas */}
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+          <div className="flex items-center justify-between mb-5">
+            <h3 className="font-black text-gray-900">Mis Rifas Activas</h3>
+            <Link href="/dashboard/rifas" className="text-xs text-[#8B4513] font-semibold hover:underline">Ver todas</Link>
+          </div>
+
+          {rifasActivas.length === 0 ? (
+            <div className="text-center py-10">
+              <div className="text-4xl mb-3">🎪</div>
+              <p className="text-gray-500 text-sm mb-4">No tienes rifas activas aún</p>
+              <Link href="/dashboard/nueva-rifa"
+                className="inline-flex items-center gap-2 bg-[#8B4513] text-white text-sm font-bold px-4 py-2 rounded-xl hover:bg-[#5C2D09] transition-colors">
+                <Plus size={14} /> Crear mi primera rifa
               </Link>
             </div>
-            <div className="divide-y divide-gray-50">
-              {vouchersPendientes.map((v) => (
-                <div key={v.id} className="px-5 py-4 hover:bg-gray-50 transition-colors">
-                  <div className="flex items-start justify-between gap-2 mb-1">
-                    <div>
-                      <p className="text-sm font-bold text-gray-800">{v.nombre}</p>
-                      <p className="text-xs text-gray-400">
-                        {v.metodo} · {v.monto} · {v.hace}
-                      </p>
-                      <p className="text-xs text-[#8B4513] font-semibold mt-0.5">
-                        Ticket {v.ticket}
-                      </p>
-                    </div>
-                    <div className="flex flex-col gap-1">
-                      <button className="text-xs bg-[#228B22] text-white px-3 py-1.5 rounded-xl font-bold hover:bg-[#1A6B1A] transition-colors">
-                        ✓
-                      </button>
-                      <button className="text-xs bg-red-50 text-red-500 px-3 py-1.5 rounded-xl font-bold hover:bg-red-100 transition-colors">
-                        ✗
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-            <div className="px-5 py-3 bg-gray-50 border-t border-gray-100">
-              <button className="w-full text-xs font-black text-[#8B4513] hover:underline">
-                Aprobar todos los pendientes →
-              </button>
-            </div>
-          </div>
-
-          {/* Actividad reciente */}
-          <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
-            <div className="px-5 py-4 border-b border-gray-50">
-              <h2 className="font-black text-gray-900 text-sm">⚡ Actividad Reciente</h2>
-            </div>
-            <div className="divide-y divide-gray-50">
-              {actividadReciente.map((a, i) => (
-                <div key={i} className="px-5 py-3 flex items-start gap-3 hover:bg-gray-50 transition-colors">
-                  <span className="text-base mt-0.5 flex-shrink-0">{a.emoji}</span>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-xs text-gray-700 leading-tight">{a.texto}</p>
-                    <p className="text-xs text-gray-400 mt-0.5">{a.hace}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Próximos sorteos */}
-          <div className="bg-[#1A1008] rounded-2xl p-5 text-white">
-            <h2 className="font-black text-sm mb-4 flex items-center gap-2">
-              <Clock size={15} className="text-[#FFD700]" />
-              Próximos Sorteos
-            </h2>
+          ) : (
             <div className="space-y-3">
-              {rifasActivas.map((rifa) => (
-                <div key={rifa.id} className="flex items-center justify-between py-2 border-b border-white/5 last:border-0">
-                  <div>
-                    <p className="text-xs font-bold text-white truncate max-w-[140px]">{rifa.nombre}</p>
-                    <p className="text-xs text-gray-400">{formatearFecha(rifa.fechaSorteo)}</p>
+              {rifasActivas.slice(0, 4).map((rifa) => {
+                const progreso = rifa.totalTickets > 0
+                  ? Math.round((rifa.ticketsVendidos / rifa.totalTickets) * 100) : 0;
+                return (
+                  <div key={rifa.id} className="flex items-center gap-4 p-3 rounded-xl hover:bg-gray-50 transition-colors">
+                    <div className="w-10 h-10 bg-[#FFF8E7] rounded-xl flex items-center justify-center text-lg shrink-0">🎪</div>
+                    <div className="flex-1 min-w-0">
+                      <div className="font-semibold text-gray-900 text-sm truncate">{rifa.titulo}</div>
+                      <div className="flex items-center gap-2 mt-1">
+                        <div className="flex-1 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                          <div className="h-full bg-[#8B4513] rounded-full" style={{ width: `${progreso}%` }} />
+                        </div>
+                        <span className="text-xs text-gray-500 shrink-0">{progreso}%</span>
+                      </div>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <div className="text-sm font-bold text-gray-900">{rifa.ticketsVendidos}/{rifa.totalTickets}</div>
+                      <div className="text-xs text-gray-400">tickets</div>
+                    </div>
                   </div>
-                  <div className="text-right">
-                    <p className="text-xs font-black text-[#FFD700]">
-                      {Math.max(0, Math.ceil((rifa.fechaSorteo.getTime() - Date.now()) / (1000 * 60 * 60 * 24)))}d
-                    </p>
-                    <p className="text-xs text-gray-500">restantes</p>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Ventas recientes */}
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+          <div className="flex items-center justify-between mb-5">
+            <h3 className="font-black text-gray-900">Ventas Recientes</h3>
+            <Link href="/dashboard/ventas" className="text-xs text-[#8B4513] font-semibold hover:underline">Ver todas</Link>
+          </div>
+
+          {ventas.length === 0 ? (
+            <div className="text-center py-10">
+              <div className="text-4xl mb-3">🎟️</div>
+              <p className="text-gray-500 text-sm">Las ventas aparecerán aquí</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {ventas.map((v) => (
+                <div key={v.id} className="flex items-center gap-3 p-3 rounded-xl hover:bg-gray-50 transition-colors">
+                  <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${
+                    v.estado === 'aprobado' ? 'bg-green-100' : v.estado === 'rechazado' ? 'bg-red-100' : 'bg-amber-100'
+                  }`}>
+                    {v.estado === 'aprobado' ? <CheckCircle size={16} className="text-green-600" /> :
+                     v.estado === 'rechazado' ? <XCircle size={16} className="text-red-500" /> :
+                     <Clock size={16} className="text-amber-500" />}
                   </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-semibold text-gray-900 truncate">
+                      {v.comprador?.nombre ?? v.comprador?.email ?? 'Comprador'}
+                    </div>
+                    <div className="text-xs text-gray-400">{v.rifa?.titulo} · #{v.ticket?.numero}</div>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <div className="text-sm font-bold text-gray-900">${Number(v.monto).toFixed(2)}</div>
+                    <div className="text-xs text-gray-400">{v.metodoPago}</div>
+                  </div>
+                  {v.estado === 'pendiente' && (
+                    <div className="flex gap-1 shrink-0">
+                      <form action={aprobarVoucher.bind(null, v.id)}>
+                        <button className="w-7 h-7 bg-green-100 hover:bg-green-200 text-green-700 rounded-lg flex items-center justify-center transition-colors">
+                          <CheckCircle size={14} />
+                        </button>
+                      </form>
+                      <form action={rechazarVoucher.bind(null, v.id, 'Rechazado desde dashboard')}>
+                        <button className="w-7 h-7 bg-red-100 hover:bg-red-200 text-red-600 rounded-lg flex items-center justify-center transition-colors">
+                          <XCircle size={14} />
+                        </button>
+                      </form>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
-            <Link
-              href="/dashboard/rifas"
-              className="mt-4 block text-center text-xs text-[#FFD700] font-bold hover:underline"
-            >
-              Ver calendario completo →
-            </Link>
-          </div>
+          )}
         </div>
       </div>
 
       {/* Accesos rápidos */}
-      <div>
-        <h2 className="text-sm font-bold text-gray-500 uppercase tracking-wider mb-4">Accesos Rápidos</h2>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          {[
-            { emoji: '🎪', label: 'Nueva Rifa', sub: 'Crear en 10 min', href: '/dashboard/rifas/nueva', color: 'bg-[#FFD700] text-[#1A1008]' },
-            { emoji: '📊', label: 'Ver Estadísticas', sub: 'Analytics completo', href: '/dashboard/ventas', color: 'bg-[#8B4513] text-white' },
-            { emoji: '👥', label: 'Mis Vendedores', sub: '5 activos', href: '/dashboard/vendedores', color: 'bg-[#228B22] text-white' },
-            { emoji: '💳', label: 'Facturación', sub: 'Plan Oro activo', href: '/dashboard/facturacion', color: 'bg-gray-900 text-white' },
-          ].map((a) => (
-            <Link
-              key={a.href}
-              href={a.href}
-              className={`${a.color} rounded-2xl p-5 flex flex-col gap-2 hover:opacity-90 transition-all hover:-translate-y-0.5`}
-            >
-              <span className="text-3xl">{a.emoji}</span>
-              <div>
-                <div className="font-black text-sm">{a.label}</div>
-                <div className="text-xs opacity-70">{a.sub}</div>
-              </div>
-            </Link>
-          ))}
-        </div>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        {[
+          { href: '/dashboard/nueva-rifa', icono: '🎪', label: 'Nueva Rifa', desc: 'Crear rifa', color: 'bg-[#FFF8E7]' },
+          { href: '/dashboard/ventas', icono: '📊', label: 'Ver Ventas', desc: 'Gestionar', color: 'bg-blue-50' },
+          { href: '/dashboard/vendedores', icono: '👥', label: 'Vendedores', desc: 'Mi equipo', color: 'bg-green-50' },
+          { href: '/dashboard/configuracion', icono: '⚙️', label: 'Configuración', desc: 'Mi perfil', color: 'bg-purple-50' },
+        ].map((item) => (
+          <Link key={item.href} href={item.href}
+            className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100 hover:shadow-md transition-shadow group">
+            <div className={`w-12 h-12 ${item.color} rounded-xl flex items-center justify-center text-2xl mb-3 group-hover:scale-110 transition-transform`}>
+              {item.icono}
+            </div>
+            <div className="font-bold text-gray-900 text-sm">{item.label}</div>
+            <div className="text-xs text-gray-400">{item.desc}</div>
+          </Link>
+        ))}
       </div>
     </div>
   );
